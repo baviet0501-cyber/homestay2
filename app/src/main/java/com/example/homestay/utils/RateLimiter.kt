@@ -19,12 +19,11 @@ object RateLimiter {
     private const val KEY_LAST_ATTEMPT = "last_attempt_"
     private const val KEY_LOCK_COUNT = "lock_count_" // Số lần đã bị khóa (tích lũy)
 
-    // Giới hạn số lần sai
+    // Giới hạn số lần sai - Đồng bộ với backend
     private const val MAX_FAILED_ATTEMPTS = 5
     
-    // Thời gian khóa tăng dần theo số lần khóa: 2s, 3s, 5s
-    // lockCount = 1: 2 giây, lockCount = 2: 3 giây, lockCount >= 3: 5 giây
-    private val LOCK_DURATION_SECONDS = listOf(2L, 3L, 5L)
+    // Thời gian khóa - Khóa vĩnh viễn (100 năm)
+    private const val LOCKOUT_DURATION_SECONDS = 100L * 365 * 24 * 60 * 60 // 100 năm
 
     /**
      * Kiểm tra xem có thể thử đăng nhập không
@@ -79,7 +78,7 @@ object RateLimiter {
      * @return Pair<Int, Long?> - (remainingAttempts, lockedUntilTimestamp)
      *         - remainingAttempts: Số lần còn lại (0 nếu bị khóa)
      *         - lockedUntilTimestamp: Timestamp khi hết khóa (null nếu chưa khóa)
-     */
+     */         
     fun recordFailure(context: Context, identifier: String): Pair<Int, Long?> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         
@@ -111,26 +110,11 @@ object RateLimiter {
         editor.putInt("$KEY_FAILED_ATTEMPTS$identifier", newAttempts)
         editor.putLong("$KEY_LAST_ATTEMPT$identifier", System.currentTimeMillis())
         
-        // Nếu đạt giới hạn (5 lần sai), khóa tài khoản
+        // Nếu đạt giới hạn (5 lần sai), khóa tài khoản vĩnh viễn
+        // Set lockedUntil thành 100 năm sau (coi như vĩnh viễn)
         if (newAttempts >= MAX_FAILED_ATTEMPTS) {
-            // Lấy số lần đã bị khóa trước đó (lock count) và tăng lên
-            val lockCount = prefs.getInt("$KEY_LOCK_COUNT$identifier", 0) + 1
-            editor.putInt("$KEY_LOCK_COUNT$identifier", lockCount)
-            
-            // Xác định thời gian khóa dựa trên lock count (số lần đã bị khóa)
-            // lockCount = 1: 2s (lần khóa đầu tiên)
-            // lockCount = 2: 3s (lần khóa thứ 2)  
-            // lockCount >= 3: 5s - Max cho các lần sau
-            val durationIndex = when {
-                lockCount == 1 -> 0 // 2 giây (lần khóa đầu tiên)
-                lockCount == 2 -> 1 // 3 giây (lần khóa thứ 2)
-                else -> 2 // 5 giây - Max cho các lần sau (lockCount >= 3)
-            }
-            
-            val lockDurationSeconds = LOCK_DURATION_SECONDS[durationIndex.coerceAtMost(LOCK_DURATION_SECONDS.size - 1)]
-            
             val newLockedUntil = System.currentTimeMillis() + 
-                TimeUnit.SECONDS.toMillis(lockDurationSeconds)
+                (LOCKOUT_DURATION_SECONDS * 1000) // Khóa vĩnh viễn
             
             editor.putLong("$KEY_LOCKED_UNTIL$identifier", newLockedUntil)
             editor.apply()
@@ -187,6 +171,66 @@ object RateLimiter {
     }
 
     /**
+     * Đồng bộ thông tin rate limit từ backend response
+     * @param context Context
+     * @param identifier Email hoặc identifier duy nhất
+     * @param failedAttempts Số lần đăng nhập thất bại từ backend
+     * @param lockedUntil Timestamp khi hết khóa từ backend (ISO string hoặc timestamp)
+     * @param remainingAttempts Số lần còn lại từ backend
+     */
+    fun syncFromBackend(
+        context: Context, 
+        identifier: String,
+        failedAttempts: Int? = null,
+        lockedUntil: Any? = null, // Có thể là String (ISO) hoặc Long (timestamp)
+        remainingAttempts: Int? = null
+    ) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        
+        // Sync failed attempts
+        if (failedAttempts != null) {
+            editor.putInt("$KEY_FAILED_ATTEMPTS$identifier", failedAttempts)
+        }
+        
+        // Sync locked until
+        if (lockedUntil != null) {
+            val lockedUntilTimestamp = when (lockedUntil) {
+                is String -> {
+                    // Parse ISO string to timestamp
+                    try {
+                        java.time.Instant.parse(lockedUntil).toEpochMilli()
+                    } catch (e: Exception) {
+                        0L
+                    }
+                }
+                is Long -> lockedUntil
+                is Number -> lockedUntil.toLong()
+                else -> 0L
+            }
+            
+            if (lockedUntilTimestamp > 0) {
+                editor.putLong("$KEY_LOCKED_UNTIL$identifier", lockedUntilTimestamp)
+            } else {
+                editor.remove("$KEY_LOCKED_UNTIL$identifier")
+            }
+        }
+        
+        editor.apply()
+    }
+    
+    /**
+     * Lấy số lần đăng nhập thất bại hiện tại
+     * @param context Context
+     * @param identifier Email hoặc identifier duy nhất
+     * @return Số lần thất bại
+     */
+    fun getFailedAttempts(context: Context, identifier: String): Int {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getInt("$KEY_FAILED_ATTEMPTS$identifier", 0)
+    }
+    
+    /**
      * Reset rate limit cho một identifier (dùng cho admin hoặc test)
      * @param context Context
      * @param identifier Email hoặc identifier duy nhất
@@ -197,7 +241,7 @@ object RateLimiter {
             .remove("$KEY_FAILED_ATTEMPTS$identifier")
             .remove("$KEY_LOCKED_UNTIL$identifier")
             .remove("$KEY_LAST_ATTEMPT$identifier")
-            .remove("$KEY_LOCK_COUNT$identifier") // Reset lock count
+            .remove("$KEY_LOCK_COUNT$identifier")
             .apply()
     }
 }

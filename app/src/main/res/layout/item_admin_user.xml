@@ -68,7 +68,34 @@
                 android:textSize="14sp"
                 android:textColor="#666666"
                 android:layout_marginTop="2dp"/>
+
+            <!-- Lock Status -->
+            <TextView
+                android:id="@+id/tv_lock_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"/>
         </LinearLayout>
+
+        <!-- Action Buttons -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Unlock Button -->
+            <ImageButton
+                android:id="@+id/btn_unlock"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_unlock"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Unlock"
+                android:visibility="gone"/>
 
         <!-- Delete Button -->
         <ImageButton
@@ -79,6 +106,7 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Delete"
             app:tint="#F44336"/>
+        </LinearLayout>
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>
 

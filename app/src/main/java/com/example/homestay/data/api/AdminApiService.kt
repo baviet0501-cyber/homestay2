@@ -16,6 +16,9 @@ interface AdminApiService {
     @GET("admin/users")
     suspend fun getUsers(): Response<AdminUsersResponse>
     
+    @POST("admin/users/{id}/unlock")
+    suspend fun unlockUser(@Path("id") userId: String): Response<Map<String, Any>>
+    
     @DELETE("admin/users/{id}")
     suspend fun deleteUser(@Path("id") userId: String): Response<Map<String, Any>>
     

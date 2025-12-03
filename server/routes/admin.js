@@ -5,6 +5,7 @@ const Admin = require('../models/Admin');
 const User = require('../models/User');
 const Room = require('../models/Room');
 const Booking = require('../models/Booking');
+const { rateLimiter } = require('../utils/security');
 
 // ==================== ADMIN AUTH ====================
 
@@ -59,25 +60,88 @@ router.post('/login', async (req, res) => {
 
 /**
  * GET /api/admin/users
- * Get all users
+ * Get all users with lock status
  */
 router.get('/users', async (req, res) => {
     try {
         const users = await User.find().select('-password').sort({ createdAt: -1 });
         
+        const now = Date.now();
+        
         res.json({
             success: true,
-            users: users.map(user => ({
-                id: user._id.toString(),
-                email: user.email,
-                phone: user.phone,
-                fullName: user.fullName,
-                createdAt: user.createdAt.getTime()
-            }))
+            users: users.map(user => {
+                const lockedUntil = user.lockedUntil ? new Date(user.lockedUntil).getTime() : null;
+                const isLocked = lockedUntil && lockedUntil > now;
+                // Kiểm tra xem có phải khóa vĩnh viễn không (lockedUntil > 100 năm)
+                const isPermanent = isLocked && lockedUntil > now + 50 * 365 * 24 * 60 * 60 * 1000; // > 50 năm = vĩnh viễn
+                
+                return {
+                    id: user._id.toString(),
+                    email: user.email,
+                    phone: user.phone,
+                    fullName: user.fullName,
+                    createdAt: user.createdAt.getTime(),
+                    failedLoginAttempts: user.failedLoginAttempts || 0,
+                    locked: isLocked,
+                    permanent: isPermanent,
+                    lockedUntil: lockedUntil,
+                    secondsRemaining: isLocked && !isPermanent ? Math.ceil((lockedUntil - now) / 1000) : null
+                };
+            })
         });
     } catch (error) {
         console.error('Get users error:', error);
         res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * POST /api/admin/users/:id/unlock
+ * Unlock user account (reset failed login attempts and lock status)
+ */
+router.post('/users/:id/unlock', async (req, res) => {
+    try {
+        const userId = req.params.id;
+        
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ 
+                success: false,
+                error: 'User not found' 
+            });
+        }
+
+        // Reset failed login attempts and unlock account
+        user.failedLoginAttempts = 0;
+        user.lockedUntil = null;
+        
+        // Reset backend rate limiter nếu có IP
+        if (user.lastLoginIP) {
+            const rateLimitKey = `auth:${user.lastLoginIP}`;
+            rateLimiter.reset(rateLimitKey);
+            console.log(`[UNLOCK] Reset rate limiter for IP: ${user.lastLoginIP}`);
+        }
+        
+        await user.save();
+
+        res.json({
+            success: true,
+            message: 'Tài khoản đã được mở khóa thành công',
+            user: {
+                id: user._id.toString(),
+                email: user.email,
+                fullName: user.fullName,
+                failedLoginAttempts: 0,
+                locked: false
+            }
+        });
+    } catch (error) {
+        console.error('Unlock user error:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Server error' 
+        });
     }
 });
 

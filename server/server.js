@@ -12,8 +12,14 @@ const PORT = process.env.PORT || 3000;
 app.use(cors()); // Cho phép tất cả origins (trong production nên giới hạn)
 app.use(express.json()); // Parse JSON body
 
+// Security middleware
+const { rateLimiters } = require('./utils/security');
+
 // Routes
-app.use('/api/auth', require('./routes/auth'));
+// Áp dụng rate limiter chỉ cho login, không áp dụng cho register
+const authRouter = require('./routes/auth');
+app.use('/api/auth/login', rateLimiters.auth, authRouter); // Rate limiter cho login
+app.use('/api/auth', authRouter); // Các route khác (register, etc.) không có rate limiter
 app.use('/api/users', require('./routes/users'));
 app.use('/api/rooms', require('./routes/rooms'));
 app.use('/api/bookings', require('./routes/bookings'));

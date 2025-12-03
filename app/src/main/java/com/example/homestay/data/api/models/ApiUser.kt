@@ -29,12 +29,28 @@ data class ApiUser(
     val createdAt: Long
 )
 
-// Auth Response
+// Rate Limit Info
+data class RateLimitInfo(
+    val remaining: Int? = null,
+    val reset: String? = null // ISO timestamp
+)
+
+// Auth Response - Đồng bộ với backend
 data class AuthResponse(
     val success: Boolean,
     val user: ApiUser? = null,
     val error: String? = null,
-    val message: String? = null
+    val message: String? = null,
+    // Rate limiting và account lockout info từ backend
+    val failedAttempts: Int? = null,
+    val remainingAttempts: Int? = null,
+    val maxAttempts: Int? = null,
+    val locked: Boolean? = null,
+    val permanent: Boolean? = null, // Khóa vĩnh viễn
+    val lockedUntil: String? = null, // ISO timestamp
+    val secondsRemaining: Long? = null,
+    val minutesRemaining: Int? = null,
+    val rateLimit: RateLimitInfo? = null
 )
 
 // Update User Request (chỉ fullName và password)

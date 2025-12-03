@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.homestay.data.api.ApiClient
 import com.example.homestay.data.api.models.AdminUserData
 import com.example.homestay.ui.admin.AdminUserAdapter
+import com.example.homestay.utils.RateLimiter
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.launch
 
@@ -45,7 +46,8 @@ class AdminUsersActivity : AppCompatActivity() {
         
         adapter = AdminUserAdapter(
             users = users,
-            onDeleteClick = { user -> showDeleteConfirmDialog(user) }
+            onDeleteClick = { user -> showDeleteConfirmDialog(user) },
+            onUnlockClick = { user -> showUnlockConfirmDialog(user) }
         )
         
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -59,6 +61,10 @@ class AdminUsersActivity : AppCompatActivity() {
                 val response = ApiClient.adminApiService.getUsers()
                 if (response.isSuccessful && response.body()?.success == true) {
                     val usersList = response.body()?.users ?: emptyList()
+                    // Log để debug
+                    usersList.forEach { user ->
+                        android.util.Log.d("AdminUsers", "User: ${user.email}, locked: ${user.locked}, failedAttempts: ${user.failedLoginAttempts}, lockedUntil: ${user.lockedUntil}")
+                    }
                     users.clear()
                     users.addAll(usersList)
                     adapter.updateUsers(usersList)
@@ -86,6 +92,54 @@ class AdminUsersActivity : AppCompatActivity() {
             .show()
     }
     
+    private fun showUnlockConfirmDialog(user: AdminUserData) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Mở khóa tài khoản")
+            .setMessage("Bạn có chắc chắn muốn mở khóa tài khoản \"${user.fullName}\" (${user.email})?")
+            .setPositiveButton("Mở khóa") { _, _ ->
+                unlockUser(user.id)
+            }
+            .setNegativeButton("Hủy", null)
+            .show()
+    }
+    
+    private fun unlockUser(userId: String) {
+        // Tìm user để lấy email trước khi unlock
+        val user = users.find { it.id == userId }
+        val userEmail = user?.email
+        
+        progressBar.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            try {
+                val response = ApiClient.adminApiService.unlockUser(userId)
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    if (body?.get("success") == true) {
+                        // Reset frontend rate limiter cho email này
+                        if (userEmail != null) {
+                            RateLimiter.reset(this@AdminUsersActivity, userEmail)
+                            android.util.Log.d("AdminUsers", "Reset rate limiter for: $userEmail")
+                        }
+                        
+                        Toast.makeText(this@AdminUsersActivity, "Mở khóa tài khoản thành công!", Toast.LENGTH_SHORT).show()
+                        // Reload users để cập nhật trạng thái
+                        loadUsers()
+                    } else {
+                        val errorMsg = body?.get("error")?.toString() ?: "Mở khóa tài khoản thất bại"
+                        Toast.makeText(this@AdminUsersActivity, errorMsg, Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    val errorBody = response.errorBody()?.string() ?: "Mở khóa tài khoản thất bại"
+                    Toast.makeText(this@AdminUsersActivity, errorBody, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@AdminUsersActivity, "Lỗi: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                progressBar.visibility = View.GONE
+            }
+        }
+    }
+
     private fun deleteUser(userId: String) {
         lifecycleScope.launch {
             try {

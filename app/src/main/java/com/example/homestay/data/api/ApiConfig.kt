@@ -13,7 +13,7 @@ import android.os.Build
  */
 object ApiConfig {
     // URL cho điện thoại thật (thay YOUR_IP_ADDRESS bằng IP thực tế của máy tính)
-    private const val BASE_URL_PHONE = "http://192.168.1.87:3000/api/"
+    private const val BASE_URL_PHONE = "http://172.16.72.226:3000/api/"
     
     // URL cho emulator (emulator có thể truy cập máy host qua 10.0.2.2)
     private const val BASE_URL_EMULATOR = "http://10.0.2.2:3000/api/"

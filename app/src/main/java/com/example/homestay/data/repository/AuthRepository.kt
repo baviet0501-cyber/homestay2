@@ -7,10 +7,19 @@ import com.example.homestay.data.api.models.LoginRequest
 import com.example.homestay.data.api.models.RegisterRequest
 import com.example.homestay.data.api.models.UpdateUserRequest
 import com.example.homestay.data.api.models.toEntity
+import com.example.homestay.data.api.models.AuthResponse
 import com.example.homestay.data.dao.UserDao
 import com.example.homestay.data.entity.User
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+/**
+ * Custom exception để truyền thông tin rate limit từ API error response
+ */
+class LoginException(
+    message: String,
+    val authResponse: AuthResponse? = null
+) : Exception(message)
 
 /**
  * Auth Data - User + MongoDB ID
@@ -72,9 +81,26 @@ class AuthRepository(
                     return@withContext Result.failure(Exception(authResponse?.error ?: "Đăng nhập thất bại"))
                 }
             } else {
-                val errorMsg = response.errorBody()?.string() ?: "Đăng nhập thất bại"
+                // Parse error response để lấy thông tin rate limit
+                val errorBody = response.errorBody()?.string()
+                val errorMsg = errorBody ?: "Đăng nhập thất bại"
                 Log.e("AuthRepository", "Login API error: ${response.code()} - $errorMsg")
-                return@withContext Result.failure(Exception("Đăng nhập thất bại: ${response.code()}"))
+                
+                // Try to parse error response as AuthResponse để lấy rate limit info
+                try {
+                    val gson = com.google.gson.Gson()
+                    val errorResponse = gson.fromJson(errorBody, AuthResponse::class.java)
+                    
+                    // Tạo exception với message và attach AuthResponse
+                    val exception = LoginException(
+                        errorResponse.error ?: errorMsg,
+                        errorResponse
+                    )
+                    return@withContext Result.failure(exception)
+                } catch (e: Exception) {
+                    // Nếu không parse được, trả về error thông thường
+                    return@withContext Result.failure(Exception(errorMsg))
+                }
             }
         } catch (e: Exception) {
             Log.e("AuthRepository", "Login exception: ${e.message}", e)

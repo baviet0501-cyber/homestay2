@@ -83,26 +83,94 @@ class AuthViewModel(
                         mongoUserId = authData?.mongoUserId
                     )
                 } else {
-                    // Đăng nhập thất bại - ghi nhận vào rate limiter
-                    val errorMsg = result.exceptionOrNull()?.message ?: "Đăng nhập thất bại"
-                    if (context != null) {
-                        val (remainingAttempts, newLockedUntil) = RateLimiter.recordFailure(context, email)
-                        val message = if (remainingAttempts > 0) {
-                            "$errorMsg. Còn $remainingAttempts lần thử."
-                        } else {
-                            "Đã vượt quá số lần đăng nhập sai. Tài khoản đã bị khóa."
+                    // Đăng nhập thất bại - lấy thông tin từ backend response
+                    val exception = result.exceptionOrNull()
+                    val errorMsg = exception?.message ?: "Đăng nhập thất bại"
+                    
+                    // Kiểm tra xem có phải LoginException với AuthResponse không
+                    val loginException = exception as? com.example.homestay.data.repository.LoginException
+                    val authResponse = loginException?.authResponse
+                    
+                    if (authResponse != null && context != null) {
+                        // Đồng bộ thông tin từ backend vào RateLimiter
+                        RateLimiter.syncFromBackend(
+                            context = context,
+                            identifier = email,
+                            failedAttempts = authResponse.failedAttempts,
+                            lockedUntil = authResponse.lockedUntil,
+                            remainingAttempts = authResponse.remainingAttempts
+                        )
+                        
+                        // Sử dụng thông tin từ backend
+                        val remainingAttempts = authResponse.remainingAttempts ?: 0
+                        val lockedUntilTimestamp = authResponse.lockedUntil?.let {
+                            try {
+                                java.time.Instant.parse(it).toEpochMilli()
+                            } catch (e: Exception) {
+                                null
+                            }
                         }
+                        
+                        val message = when {
+                            authResponse.locked == true && authResponse.permanent == true -> {
+                                authResponse.message ?: "Tài khoản đã bị khóa vĩnh viễn. Vui lòng liên hệ admin để mở khóa."
+                            }
+                            authResponse.locked == true -> {
+                                val minutes = authResponse.minutesRemaining ?: 0
+                                authResponse.message ?: "Tài khoản đã bị khóa. Vui lòng thử lại sau $minutes phút."
+                            }
+                            remainingAttempts > 0 -> {
+                                authResponse.message ?: "$errorMsg. Còn $remainingAttempts lần thử."
+                            }
+                            else -> {
+                                authResponse.message ?: errorMsg
+                            }
+                        }
+                        
                         _loginResult.value = AuthResult(
                             success = false,
                             message = message,
                             remainingAttempts = remainingAttempts,
-                            lockedUntil = newLockedUntil
+                            lockedUntil = lockedUntilTimestamp
                         )
                     } else {
-                        _loginResult.value = AuthResult(
-                            success = false,
-                            message = errorMsg
-                        )
+                        // Fallback: chỉ sử dụng local rate limiter nếu KHÔNG có thông tin từ backend
+                        // (tức là lỗi mạng hoặc server không phản hồi)
+                        if (context != null) {
+                            // Chỉ record failure nếu đây là lỗi xác thực thực sự (không phải lỗi mạng)
+                            // Nếu errorMsg chứa "401" hoặc "password" thì mới là lỗi đăng nhập
+                            val isAuthError = errorMsg.contains("401") || 
+                                            errorMsg.contains("password", ignoreCase = true) ||
+                                            errorMsg.contains("email", ignoreCase = true) ||
+                                            errorMsg.contains("không đúng", ignoreCase = true) ||
+                                            errorMsg.contains("không tồn tại", ignoreCase = true)
+                            
+                            if (isAuthError) {
+                                val (remainingAttempts, newLockedUntil) = RateLimiter.recordFailure(context, email)
+                                val message = if (remainingAttempts > 0) {
+                                    "$errorMsg. Còn $remainingAttempts lần thử."
+                                } else {
+                                    "Đã vượt quá số lần đăng nhập sai. Tài khoản đã bị khóa."
+                                }
+                                _loginResult.value = AuthResult(
+                                    success = false,
+                                    message = message,
+                                    remainingAttempts = remainingAttempts,
+                                    lockedUntil = newLockedUntil
+                                )
+                            } else {
+                                // Lỗi mạng hoặc lỗi khác - không record failure
+                                _loginResult.value = AuthResult(
+                                    success = false,
+                                    message = errorMsg
+                                )
+                            }
+                        } else {
+                            _loginResult.value = AuthResult(
+                                success = false,
+                                message = errorMsg
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {

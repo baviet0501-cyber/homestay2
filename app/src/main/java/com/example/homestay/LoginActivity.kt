@@ -59,6 +59,17 @@ class LoginActivity : AppCompatActivity() {
             true
         }
 
+        // Animation cho Form Container
+        val loginForm = findViewById<android.view.View>(R.id.login_form_container)
+        loginForm.alpha = 0f
+        loginForm.translationY = 100f
+        loginForm.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(800)
+            .setStartDelay(200)
+            .start()
+
         btnLogin.setOnClickListener {
             val email = etEmail.text?.toString()?.trim() ?: ""
             val password = etPassword.text?.toString() ?: ""

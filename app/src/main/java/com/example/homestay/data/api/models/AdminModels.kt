@@ -56,7 +56,12 @@ data class AdminUserData(
     val email: String,
     val phone: String,
     val fullName: String,
-    val createdAt: Long
+    val createdAt: Long,
+    val failedLoginAttempts: Int? = null,
+    val locked: Boolean? = null,
+    val permanent: Boolean? = null, // Khóa vĩnh viễn
+    val lockedUntil: Long? = null, // Timestamp
+    val secondsRemaining: Long? = null
 )
 
 data class AdminUsersResponse(

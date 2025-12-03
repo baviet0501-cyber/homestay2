@@ -5,7 +5,7 @@ import org.mindrot.jbcrypt.BCrypt
 /**
  * Utility class for password hashing and verification using BCrypt
  * 
- * ✅ ĐÃ TRIỂN KHAI - Tính năng 1: Mã hóa mật khẩu
+ * - Tính năng 1: Mã hóa mật khẩu
  * - Sử dụng BCrypt với salt tự động
  * - Work factor: 12 (tùy chỉnh theo yêu cầu)
  * - Bảo mật mật khẩu ngay cả khi database bị rò rỉ
